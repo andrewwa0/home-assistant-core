@@ -8,8 +8,9 @@ import logging
 from homeassistant.core import HomeAssistant, ServiceCall, State, Event, callback
 from homeassistant.helpers.entity import ToggleEntity
 from homeassistant.helpers.entity_component import EntityComponent
-from homeassistant.helpers import config_validation, entity_registry
+from homeassistant.helpers import config_validation, entity_registry, device_registry
 from homeassistant.helpers.entity_registry import EntityRegistry, RegistryEntry
+from homeassistant.helpers.device_registry import DeviceRegistry, DeviceEntry
 from homeassistant.helpers.event import async_track_state_change_event, async_track_state_added_domain, async_track_state_removed_domain
 
 from homeassistant.const import (
@@ -64,11 +65,13 @@ class OffTimer:
 class default_values():
 
     hass:HomeAssistant = None
-    registry:EntityRegistry = None
+    entity_registry:EntityRegistry = None
+    device_registry:DeviceRegistry = None
 
     def setup(hass:HomeAssistant, component:EntityComponent):
         default_values.hass = hass
-        default_values.registry = entity_registry.async_get(hass)
+        default_values.entity_registry = entity_registry.async_get(hass)
+        default_values.device_registry = device_registry.async_get(hass)
         default_values.night_mode = default_values.hass.states.is_state("input_boolean.night_mode",STATE_ON)
         default_values.current_brightness = default_values.calculate_current_brightness()
         default_values.current_temperature = default_values.calculate_current_temperature()
@@ -99,46 +102,50 @@ class default_values():
         params.update(call.data)
         await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params)
     
-    async def get_entity_list_from_area_id(area_id) -> list[str]:
-        entityid_list = []
+    async def get_entities_from_area_id(area_id) -> set[str]:
+        entityid_list:set = set()
         if isinstance(area_id,list):
             for area_id_element in area_id:
-                entityid_list.extend(await default_values.get_entity_list_from_area_id(area_id_element))
+                entityid_list.update(await default_values.get_entities_from_area_id(area_id_element))
         elif isinstance(area_id,str):
-            entries:list[RegistryEntry] = entity_registry.async_entries_for_area(default_values.registry,area_id)
+            entries:list[RegistryEntry] = entity_registry.async_entries_for_area(default_values.entity_registry,area_id)
             for entry in entries:
-                if entry.domain == "light": entityid_list.append(entry.entity_id)
+                if entry.domain == "light": entityid_list.add(entry.entity_id)
+            entries:list[DeviceRegistry] = device_registry.async_entries_for_area(default_values.device_registry,area_id)
+            for entry in entries:
+                entityid_list.update(await default_values.get_entities_from_device_id(entry.id))
+
         return entityid_list
     
-    async def get_entity_list_from_device_id(device_id) -> list[str]:
-        entityid_list = []
+    async def get_entities_from_device_id(device_id) -> set[str]:
+        entityid_list:set = set()
         if isinstance(device_id,list):
             for area_id_element in device_id:
-                entityid_list.extend(await default_values.get_entity_list_from_device_id(area_id_element))
+                entityid_list.unite(await default_values.get_entities_from_device_id(area_id_element))
         elif isinstance(device_id,str):
-            entries:list[RegistryEntry] = entity_registry.async_entries_for_device(default_values.registry,device_id)
+            entries:list[RegistryEntry] = entity_registry.async_entries_for_device(default_values.entity_registry,device_id)
             for entry in entries:
-                if entry.domain == "light": entityid_list.append(entry.entity_id)
+                if entry.domain == "light": entityid_list.add(entry.entity_id)
         return entityid_list
 
-    async def get_entity_list_from_service_call(call:ServiceCall) -> list[str]:
-        entityid_list = []
+    async def get_entities_from_service_call(call:ServiceCall) -> set[str]:
+        entityid_list:set = set()
         if ATTR_AREA_ID in call.data:
-            entityid_list.extend(await default_values.get_entity_list_from_area_id(call.data.get(ATTR_AREA_ID,None)))
+            entityid_list.update(await default_values.get_entities_from_area_id(call.data.get(ATTR_AREA_ID,None)))
             _LOGGER.info("get_entity_list_from_service_call area_id:%s -> %s",str(call.data.get(ATTR_AREA_ID)),str(entityid_list))
         if ATTR_DEVICE_ID in call.data:
-            entityid_list.extend(await default_values.get_entity_list_from_device_id(call.data.get(ATTR_DEVICE_ID,None)))
+            entityid_list.update(await default_values.get_entities_from_device_id(call.data.get(ATTR_DEVICE_ID,None)))
             _LOGGER.info("get_entity_list_from_service_call device_id:%s -> %s",str(call.data.get(ATTR_DEVICE_ID)),str(entityid_list))
         if ATTR_ENTITY_ID in call.data:
             var = call.data.get(ATTR_ENTITY_ID)
             if isinstance(var,list):
-                entityid_list.extend(var)
+                entityid_list.update(var)
             if isinstance(var,str):
-                entityid_list.append(var)
+                entityid_list.add(var)
         return entityid_list
 
     async def async_handle_light_dim_service(light:ToggleEntity, call:ServiceCall):
-        # _LOGGER.info("async_handle_light_auto_service: light:%s call:%s", str(light), str(call))
+        # _LOGGER.info("async_handle_light_auto_service: call:%s", str(call))
         if light is not None and light.is_on:
             params = {}
             if ATTR_ENTITY_ID in call.data: params[ATTR_ENTITY_ID] = call.data.get(ATTR_ENTITY_ID)
@@ -152,7 +159,7 @@ class default_values():
             off_after = call.data.get(ATTR_OFF_AFTER,None)
             if off_after is not None:
                 off_transition = call.data.get(ATTR_OFF_TRANSITION,None)
-                entity_id_list:list[str] = await default_values.get_entity_list_from_service_call(call)
+                entity_id_list:set[str] = await default_values.get_entities_from_service_call(call)
                 for entity_id in entity_id_list:
                     default_values.start_off_timer(entity_id,off_after,off_transition)
 
