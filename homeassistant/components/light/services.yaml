@@ -586,3 +586,53 @@ toggle:
       description: Light effect.
       selector:
         text:
+
+auto_on:
+  name: Automatic On
+  description: Turn on (or reset) a light to full automatic
+  target:
+    entity:
+      domain: light
+  fields:
+    transition:
+      name: Transition
+      description: Duration it takes to get to next state.
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+
+dim:
+  name: Dim
+  description: Dim a light and optionally turn it off
+  target:
+    entity:
+      domain: light
+  fields:
+    off_after:
+      name: Turn off
+      description: Duration before turning the light off.
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+    dim_transition:
+      name: Dim transition
+      description: Duration it takes to get to next state.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+    off_transition:
+      name: Off transition
+      description: Duration it takes to get to next state.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds

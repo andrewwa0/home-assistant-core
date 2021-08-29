@@ -3,5 +3,6 @@
   "name": "Light",
   "documentation": "https://www.home-assistant.io/integrations/light",
   "codeowners": [],
-  "quality_scale": "internal"
+  "quality_scale": "internal",
+  "version": "1.0.0"
 }

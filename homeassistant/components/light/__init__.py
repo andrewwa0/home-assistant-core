@@ -30,6 +30,8 @@ from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.loader import bind_hass
 import homeassistant.util.color as color_util
 
+from .default_values import default_values, ATTR_AUTOMATIC_UPDATE
+
 # mypy: allow-untyped-defs, no-check-untyped-defs
 
 DOMAIN = "light"
@@ -202,6 +204,7 @@ LIGHT_TURN_ON_SCHEMA = {
     vol.Exclusive(ATTR_COLOR_TEMP, COLOR_GROUP): vol.All(
         vol.Coerce(int), vol.Range(min=1)
     ),
+    vol.Exclusive(ATTR_AUTOMATIC_UPDATE, ATTR_AUTOMATIC_UPDATE): vol.Coerce(bool),
     vol.Exclusive(ATTR_KELVIN, COLOR_GROUP): cv.positive_int,
     vol.Exclusive(ATTR_HS_COLOR, COLOR_GROUP): vol.All(
         vol.ExactSequence(
@@ -276,6 +279,8 @@ def filter_turn_off_params(light, params):
     """Filter out params not used in turn off or not supported by the light."""
     supported_features = light.supported_features
 
+    default_values.apply_default_off_values(light,params)
+
     if not supported_features & SUPPORT_FLASH:
         params.pop(ATTR_FLASH, None)
     if not supported_features & SUPPORT_TRANSITION:
@@ -287,6 +292,8 @@ def filter_turn_off_params(light, params):
 def filter_turn_on_params(light, params):
     """Filter out params not supported by the light."""
     supported_features = light.supported_features
+
+    default_values.apply_default_on_values(light,params)
 
     if not supported_features & SUPPORT_EFFECT:
         params.pop(ATTR_EFFECT, None)
@@ -326,6 +333,8 @@ async def async_setup(hass, config):  # noqa: C901
         _LOGGER, DOMAIN, hass, SCAN_INTERVAL
     )
     await component.async_setup(config)
+
+    default_values.setup(hass,component)
 
     profiles = hass.data[DATA_PROFILES] = Profiles(hass)
     await profiles.async_initialize()
