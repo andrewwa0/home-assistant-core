@@ -50,17 +50,40 @@ class OffTimer:
         self._timeout = timeout
         self._entity_id = entity_id
         self._transition = transition
-        self._task = default_values.hass.async_create_task(self._job())#asyncio.create_task(self._job())
+        self._task = default_values.hass.async_create_task(self._job())
+        _LOGGER.info("Start timer: %s (%s seconds)", self._entity_id, self._timeout)
+    
+    all_timers = {}
+
+    def start_timer(hass:HomeAssistant, entity_id:str, timeout:float, transition:float|None = None):
+        OffTimer.cancel_timer(entity_id)
+        OffTimer.all_timers[entity_id] = OffTimer(hass=hass,entity_id=entity_id,timeout=timeout,transition=transition)
+
+    def cancel_timer(entity_id:str):
+        timer:OffTimer = OffTimer.all_timers.pop(entity_id,None)
+        if timer is not None:
+            timer.cancel()
+    
+    def cancel_all_timers():
+        for entity_id in OffTimer.all_timers:
+            timer:OffTimer = OffTimer.all_timers[entity_id]
+            if timer is not None:
+                timer.cancel()
+        OffTimer.all_timers.clear()
 
     async def _job(self):
         await asyncio.sleep(self._timeout)
+        _LOGGER.info("Fire timer: %s", self._entity_id)
         if self._transition is not None:
             await self._hass.services.async_call(domain="light",service=SERVICE_TURN_OFF,service_data={ATTR_ENTITY_ID:self._entity_id,ATTR_TRANSITION:self._transition})
         else:
             await self._hass.services.async_call(domain="light",service=SERVICE_TURN_OFF,service_data={ATTR_ENTITY_ID:self._entity_id})
+        OffTimer.all_timers.pop(self._entity_id)
 
     def cancel(self):
-        self._task.cancel()
+        if not self._task.done():
+            _LOGGER.info("Cancel timer: %s", self._entity_id)
+            self._task.cancel()
 
 class default_values():
 
@@ -132,10 +155,10 @@ class default_values():
         entityid_list:set = set()
         if ATTR_AREA_ID in call.data:
             entityid_list.update(await default_values.get_entities_from_area_id(call.data.get(ATTR_AREA_ID,None)))
-            _LOGGER.info("get_entity_list_from_service_call area_id:%s -> %s",str(call.data.get(ATTR_AREA_ID)),str(entityid_list))
+            _LOGGER.debug("get_entity_list_from_service_call area_id:%s -> %s",str(call.data.get(ATTR_AREA_ID)),str(entityid_list))
         if ATTR_DEVICE_ID in call.data:
             entityid_list.update(await default_values.get_entities_from_device_id(call.data.get(ATTR_DEVICE_ID,None)))
-            _LOGGER.info("get_entity_list_from_service_call device_id:%s -> %s",str(call.data.get(ATTR_DEVICE_ID)),str(entityid_list))
+            _LOGGER.debug("get_entity_list_from_service_call device_id:%s -> %s",str(call.data.get(ATTR_DEVICE_ID)),str(entityid_list))
         if ATTR_ENTITY_ID in call.data:
             var = call.data.get(ATTR_ENTITY_ID)
             if isinstance(var,list):
@@ -161,7 +184,7 @@ class default_values():
                 off_transition = call.data.get(ATTR_OFF_TRANSITION,None)
                 entity_id_list:set[str] = await default_values.get_entities_from_service_call(call)
                 for entity_id in entity_id_list:
-                    default_values.start_off_timer(entity_id,off_after,off_transition)
+                    OffTimer.start_timer(default_values.hass,entity_id,off_after,off_transition)
 
     automatic_lights = []
     tracking_brightness = []
@@ -169,18 +192,6 @@ class default_values():
     current_brightness:int = None
     current_temperature:int = None
     night_mode:bool = False
-    off_timers = {}
-
-    def start_off_timer(entity_id:str, timeout:float, transition:float|None = None):
-        default_values.cancel_off_timer(entity_id)
-        _LOGGER.info("Start timer: %s (%s seconds)", entity_id, timeout)
-        default_values.off_timers[entity_id] = OffTimer(hass=default_values.hass,entity_id=entity_id,timeout=timeout,transition=transition)
-
-    def cancel_off_timer(entity_id:str):
-        timer:OffTimer = default_values.off_timers.pop(entity_id,None)
-        if timer is not None:
-            _LOGGER.info("Cancel timer: %s", entity_id)
-            timer.cancel()
 
     def close_enough(v1:int, v2:int) -> bool:
         if v1 is not None:
@@ -239,6 +250,8 @@ class default_values():
         else:
             _LOGGER.info("Night mode initialised to %s", mode)
         default_values.night_mode = (mode == STATE_ON)
+        if default_values.night_mode:
+            OffTimer.cancel_all_timers()
 
     @callback
     async def async_default_brightness_changed(_event:Event) -> None:
@@ -299,27 +312,25 @@ class default_values():
             return max
         return value
 
-    def set_tracking_brightness(entityid:str, tracking:bool):
+    def set_tracking_brightness(entity_id:str, tracking:bool):
         if tracking:
-            if entityid not in default_values.tracking_brightness:
-                default_values.tracking_brightness.append(entityid)
-        elif entityid in default_values.tracking_brightness:
-            default_values.tracking_brightness.remove(entityid)
+            if entity_id not in default_values.tracking_brightness:
+                default_values.tracking_brightness.append(entity_id)
+        elif entity_id in default_values.tracking_brightness:
+            default_values.tracking_brightness.remove(entity_id)
 
-    def set_tracking_temperature(entityid:str, tracking:bool):
+    def set_tracking_temperature(entity_id:str, tracking:bool):
         if tracking:
-            if entityid not in default_values.tracking_temperature:
-                default_values.tracking_temperature.append(entityid)
-        elif entityid in default_values.tracking_temperature:
-            default_values.tracking_temperature.remove(entityid)
+            if entity_id not in default_values.tracking_temperature:
+                default_values.tracking_temperature.append(entity_id)
+        elif entity_id in default_values.tracking_temperature:
+            default_values.tracking_temperature.remove(entity_id)
     
     def is_light_automatic(entity_id:str) -> bool:
         # TODO: cache results
         return entity_id in default_values.automatic_lights
 
     def apply_default_on_values(light:ToggleEntity, params:dict):
-
-        default_values.cancel_off_timer(entity_id=light.entity_id)
 
         automatic_light:bool = default_values.is_light_automatic(light.entity_id)
         is_on:bool = light.is_on
@@ -332,16 +343,16 @@ class default_values():
                     # nothing specified (re-turn on the light e.g. motion re-triggered)
                     params[ATTR_BRIGHTNESS] = default_values.current_brightness
                     params[ATTR_COLOR_TEMP] = default_values.current_temperature
-                    default_values.set_tracking_brightness(entityid=light.entity_id, tracking=True)
-                    default_values.set_tracking_temperature(entityid=light.entity_id, tracking=True)
+                    default_values.set_tracking_brightness(entity_id=light.entity_id, tracking=True)
+                    default_values.set_tracking_temperature(entity_id=light.entity_id, tracking=True)
                 else:
                     if ATTR_BRIGHTNESS in params:
                         # stop tracking brightness
-                        default_values.set_tracking_brightness(entityid=light.entity_id, tracking=False)
+                        default_values.set_tracking_brightness(entity_id=light.entity_id, tracking=False)
 
                     if ATTR_COLOR_TEMP in params:
                         # stop tracking temperature
-                        default_values.set_tracking_temperature(entityid=light.entity_id, tracking=False)
+                        default_values.set_tracking_temperature(entity_id=light.entity_id, tracking=False)
             else:
                 # the light is being turned on
 
@@ -353,8 +364,8 @@ class default_values():
                 if ATTR_COLOR_TEMP not in params:
                     temperature = True
 
-                default_values.set_tracking_brightness(entityid=light.entity_id, tracking=brightness)
-                default_values.set_tracking_temperature(entityid=light.entity_id, tracking=temperature)
+                default_values.set_tracking_brightness(entity_id=light.entity_id, tracking=brightness)
+                default_values.set_tracking_temperature(entity_id=light.entity_id, tracking=temperature)
                 if brightness:
                     params[ATTR_BRIGHTNESS] = default_values.current_brightness
                 if temperature:
@@ -365,7 +376,11 @@ class default_values():
                     if transition is not None:
                         params[ATTR_TRANSITION] = transition
         
-        _LOGGER.info("%s %s (A:%s B:%s T:%s) %s", 
+        if ATTR_BRIGHTNESS in params:
+            # prevent the time from turning off the light
+            OffTimer.cancel_timer(entity_id=light.entity_id)
+        
+        _LOGGER.debug("%s %s (A:%s B:%s T:%s) %s", 
             ("UPDATE" if is_on else "ON"),
             light.entity_id,
             str(automatic_light),
@@ -376,14 +391,14 @@ class default_values():
     def apply_default_off_values(light:ToggleEntity, params:dict):
         automatic_light:bool = default_values.is_light_automatic(light.entity_id)
         if automatic_light:
-            default_values.set_tracking_brightness(entityid=light.entity_id, tracking=False)
-            default_values.set_tracking_temperature(entityid=light.entity_id, tracking=False)
+            default_values.set_tracking_brightness(entity_id=light.entity_id, tracking=False)
+            default_values.set_tracking_temperature(entity_id=light.entity_id, tracking=False)
             if ATTR_TRANSITION not in params:
                 transition:float = default_values.off_transition_time()
                 if transition is not None:
                     params[ATTR_TRANSITION] = transition
 
-        _LOGGER.info("OFF %s (A:%s B:%s T:%s) %s", 
+        _LOGGER.debug("OFF %s (A:%s B:%s T:%s) %s", 
             light.entity_id, str(automatic_light),
             str(light.entity_id in default_values.tracking_brightness),
             str(light.entity_id in default_values.tracking_temperature),
