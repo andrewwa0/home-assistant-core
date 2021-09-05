@@ -120,10 +120,18 @@ class default_values():
         return base
 
     async def async_handle_light_auto_service(light:ToggleEntity, call:ServiceCall):
-        # _LOGGER.info("async_handle_light_auto_service: light:%s call:%s", str(light), str(call))
+        _LOGGER.info("async_handle_light_auto_service: light:%s call:%s", str(light), str(call))
         params = {}
-        params.update(call.data)
-        await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params)
+        # params.update(call.data)
+        # await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params)
+        if ATTR_COLOR_TEMP in call.data: params[ATTR_COLOR_TEMP] = call.data.get(ATTR_COLOR_TEMP)
+        if ATTR_BRIGHTNESS in call.data: params[ATTR_BRIGHTNESS] = call.data.get(ATTR_BRIGHTNESS)
+        if ATTR_TRANSITION in call.data: params[ATTR_TRANSITION] = call.data.get(ATTR_TRANSITION)
+        # entity_id_list:set[str] = await default_values.get_entities_from_service_call(call)
+        # for entity_id in entity_id_list:
+        params[ATTR_ENTITY_ID] = light.entity_id
+        # _LOGGER.info("  - light_turn_on: entity_id:%s params:%s", str(entity_id), str(params))
+        await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params,blocking=True)
     
     async def get_entities_from_area_id(area_id) -> set[str]:
         entityid_list:set = set()
@@ -168,12 +176,13 @@ class default_values():
         return entityid_list
 
     async def async_handle_light_dim_service(light:ToggleEntity, call:ServiceCall):
-        # _LOGGER.info("async_handle_light_auto_service: call:%s", str(call))
+        _LOGGER.info("async_handle_light_dim_service: light:%s call:%s", str(light), str(call))
         if light is not None and light.is_on:
             params = {}
-            if ATTR_ENTITY_ID in call.data: params[ATTR_ENTITY_ID] = call.data.get(ATTR_ENTITY_ID)
-            if ATTR_AREA_ID in call.data: params[ATTR_AREA_ID] = call.data.get(ATTR_AREA_ID)
-            if ATTR_DEVICE_ID in call.data: params[ATTR_DEVICE_ID] = call.data.get(ATTR_DEVICE_ID)
+            # if ATTR_ENTITY_ID in call.data: params[ATTR_ENTITY_ID] = call.data.get(ATTR_ENTITY_ID)
+            # if ATTR_AREA_ID in call.data: params[ATTR_AREA_ID] = call.data.get(ATTR_AREA_ID)
+            # if ATTR_DEVICE_ID in call.data: params[ATTR_DEVICE_ID] = call.data.get(ATTR_DEVICE_ID)
+            params[ATTR_ENTITY_ID] = light.entity_id
             if ATTR_COLOR_TEMP in call.data: params[ATTR_COLOR_TEMP] = call.data.get(ATTR_COLOR_TEMP)
             if ATTR_DIM_TRANSITION in call.data: params[ATTR_TRANSITION] = call.data.get(ATTR_DIM_TRANSITION)
             params[ATTR_BRIGHTNESS] = int(default_values.clamp_int(default_values.current_brightness / 4,3,255))
@@ -182,9 +191,9 @@ class default_values():
             off_after = call.data.get(ATTR_OFF_AFTER,None)
             if off_after is not None:
                 off_transition = call.data.get(ATTR_OFF_TRANSITION,None)
-                entity_id_list:set[str] = await default_values.get_entities_from_service_call(call)
-                for entity_id in entity_id_list:
-                    OffTimer.start_timer(default_values.hass,entity_id,off_after,off_transition)
+                # entity_id_list:set[str] = await default_values.get_entities_from_service_call(call)
+                # for entity_id in entity_id_list:
+                OffTimer.start_timer(default_values.hass,light.entity_id,off_after,off_transition)
 
     automatic_lights = []
     tracking_brightness = []
