@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from asyncio.tasks import Task, sleep
+import json
 import logging
+import aiohttp
 
 from homeassistant.core import HomeAssistant, ServiceCall, State, Event, callback
 from homeassistant.helpers.entity import ToggleEntity
@@ -90,6 +93,105 @@ class default_values():
     hass:HomeAssistant = None
     entity_registry:EntityRegistry = None
     device_registry:DeviceRegistry = None
+    hue_auto_brightness_group:str = None
+    hue_auto_temperature_group:str = None
+    session = aiohttp.ClientSession()
+
+    hue_uniqueid = {} # unique_id -> light_number
+    hass_uniqueid = {} # entity_id -> unique_id
+
+    update_hue_groups_task:Task = None
+    hue_base_uri:str = 'http://192.168.1.2/api/fzrRwobrK-cDGj3wJKiOZJ2fdiDCPrXGWKzXzGjl'
+
+    async def process_hue():
+        _LOGGER.info("process_hue")
+        async with default_values.session.get(default_values.hue_base_uri+'/lights') as resp:
+            _LOGGER.info(resp.status)
+            json = await resp.json()
+            for light_id in json:
+                light = json[light_id]
+                name:str = light["name"]
+                unique_id:str = light['uniqueid']
+                # self.Lights[id] = name
+                _LOGGER.info("Discovered '%s' UniqueID: '%s'",name,unique_id)
+                default_values.hue_uniqueid[unique_id] = light_id
+        async with default_values.session.get(default_values.hue_base_uri+'/groups') as resp:
+            _LOGGER.info(resp.status)
+            json = await resp.json()
+            for group_id in json:
+                group = json[group_id]
+                name:str = group["name"]
+                if name == 'Auto Temperature':
+                    default_values.hue_auto_temperature_group = group_id
+                    _LOGGER.info("Hue Automatic Temperature groupid is %s", group_id)
+                if name == 'Auto Brightness':
+                    default_values.hue_auto_brightness_group = group_id
+                    _LOGGER.info("Hue Automatic Brightness groupid is %s", group_id)
+        await default_values.update_hue_groups()
+
+    async def update_hue_groups():
+        await sleep(2)
+        auto_brightness_lights = []
+        auto_temperature_lights = []
+        for entity_id in default_values.tracking_brightness:
+            unique_id = default_values.hass_uniqueid.get(entity_id,None)
+            if unique_id is not None:
+                light_id = default_values.hue_uniqueid.get(unique_id,None)
+                if light_id is not None:
+                    auto_brightness_lights.append(light_id)
+                else:
+                    _LOGGER.warning("Hue light_id not found for '%s' -> '%s'", entity_id, unique_id)
+            else:
+                _LOGGER.warning("Hue unique_id not found for '%s'", entity_id)
+        for entity_id in default_values.tracking_temperature:
+            unique_id = default_values.hass_uniqueid.get(entity_id,None)
+            if unique_id is not None:
+                light_id = default_values.hue_uniqueid.get(unique_id,None)
+                if light_id is not None:
+                    auto_temperature_lights.append(light_id)
+                else:
+                    _LOGGER.warning("Hue light_id not found for '%s' -> '%s'", entity_id, unique_id)
+            else:
+                _LOGGER.warning("Hue unique_id not found for '%s'", entity_id)
+        if default_values.hue_auto_brightness_group is not None:
+            _LOGGER.info("SET HUE GROUP %s (BRIGHTNESS) %s", default_values.hue_auto_brightness_group, str(auto_brightness_lights))
+            update:str = json.dumps({'lights':auto_brightness_lights})
+            uri:str = default_values.hue_base_uri+'/groups/'+default_values.hue_auto_brightness_group
+            async with await default_values.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
+                _LOGGER.info("HTTP %s",str(res.status))
+                _LOGGER.info("DATA %s",await res.json())
+        if default_values.hue_auto_temperature_group is not None:
+            _LOGGER.info("SET HUE GROUP %s (TEMPERATURE) %s", default_values.hue_auto_temperature_group, str(auto_temperature_lights))
+            update:str = json.dumps({'lights':auto_temperature_lights})
+            uri:str = default_values.hue_base_uri+'/groups/'+default_values.hue_auto_temperature_group
+            async with await default_values.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
+                _LOGGER.info("HTTP %s",str(res.status))
+                _LOGGER.info("DATA %s",await res.json())
+
+        default_values.update_hue_groups_task = None
+
+    async def update_hue_brightness():
+        if default_values.hue_auto_brightness_group is not None:
+            update:str = json.dumps({'bri':default_values.current_brightness})
+            uri:str = default_values.hue_base_uri+'/groups/'+default_values.hue_auto_brightness_group+'/action'
+            async with await default_values.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
+                _LOGGER.info("HTTP %s",str(res.status))
+                _LOGGER.info("DATA %s",await res.json())
+    
+    async def update_hue_temperature():
+        if default_values.hue_auto_temperature_group is not None:
+            update:str = json.dumps({'ct':default_values.current_temperature})
+            uri:str = default_values.hue_base_uri+'/groups/'+default_values.hue_auto_temperature_group+'/action'
+            async with await default_values.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
+                _LOGGER.info("HTTP %s",str(res.status))
+                _LOGGER.info("DATA %s",await res.json())
+
+    def update_hue_groups_later():
+        if default_values.update_hue_groups_task is not None:
+            default_values.update_hue_groups_task.cancel()
+        if default_values.hue_auto_brightness_group is not None:
+            if default_values.hue_auto_temperature_group is not None:
+                default_values.update_hue_groups_task = default_values.hass.async_create_task(default_values.update_hue_groups())
 
     def setup(hass:HomeAssistant, component:EntityComponent):
         default_values.hass = hass
@@ -107,7 +209,7 @@ class default_values():
 
         component.async_register_entity_service("auto_on",vol.All(config_validation.make_entity_service_schema(LIGHT_AUTO_SCHEMA)),default_values.async_handle_light_auto_service)
         component.async_register_entity_service("dim",vol.All(config_validation.make_entity_service_schema(LIGHT_DIM_SCHEMA)),default_values.async_handle_light_dim_service)
-    
+   
     def preprocess_data(data):
         """Preprocess the service data."""
         base = {
@@ -212,10 +314,19 @@ class default_values():
     async def async_home_assistant_started(event:Event):
         _LOGGER.info("Automatic lights:")
         for entity_id in default_values.automatic_lights:
-            _LOGGER.info("  - %s (B:%s T:%s)", entity_id,
+
+            entry:RegistryEntry = default_values.entity_registry.async_get(entity_id)
+            unique_id:str = "???"
+            if entry is not None:
+                default_values.hass_uniqueid[entity_id] = entry.unique_id
+                unique_id = entry.unique_id
+
+            _LOGGER.info("  - %s (B:%s T:%s) %s", entity_id,
                 str(entity_id in default_values.tracking_brightness),
-                str(entity_id in default_values.tracking_temperature)
+                str(entity_id in default_values.tracking_temperature),
+                unique_id
             )
+        default_values.hass.async_create_task(default_values.process_hue())
 
     @callback
     async def async_state_added(event:Event) -> None:
@@ -235,7 +346,6 @@ class default_values():
                             color_temp:int = state.attributes.get(ATTR_COLOR_TEMP,0)
                             if default_values.close_enough(color_temp,default_values.current_temperature):
                                 default_values.set_tracking_temperature(entity_id,True)
-                        
         _LOGGER.info("Add light %s (Auto:%s On:%s B:%s T:%s)", 
             entity_id, str(state is not None and state.state is not None and state.state == STATE_ON),
             str(entity_id is not None and entity_id in default_values.tracking_brightness),
@@ -272,11 +382,12 @@ class default_values():
         else:
             _LOGGER.info("Default brightness changed from %s to %s", str(int(float(old_state.state))), str(default_values.current_brightness), default_values.tracking_brightness)
             if not default_values.night_mode and len(default_values.tracking_brightness) > 0:
-                await default_values.hass.services.async_call(
-                    domain="light",
-                    service=SERVICE_TURN_ON,
-                    service_data={ATTR_ENTITY_ID:default_values.tracking_brightness,ATTR_BRIGHTNESS:default_values.current_brightness,ATTR_AUTOMATIC_UPDATE:True}
-                )
+                await default_values.update_hue_brightness()
+                # await default_values.hass.services.async_call(
+                    # domain="light",
+                    # service=SERVICE_TURN_ON,
+                    # service_data={ATTR_ENTITY_ID:default_values.tracking_brightness,ATTR_BRIGHTNESS:default_values.current_brightness,ATTR_AUTOMATIC_UPDATE:True}
+                # )
     
     @callback
     async def async_default_temperature_changed(_event:Event) -> None:
@@ -288,11 +399,12 @@ class default_values():
         else:
             _LOGGER.info("Default temperature changed from %s to %s -> %s", str(int(float(old_state.state))), str(default_values.current_temperature), default_values.tracking_temperature)
             if not default_values.night_mode and len(default_values.tracking_temperature) > 0:
-                await default_values.hass.services.async_call(
-                    domain="light",
-                    service=SERVICE_TURN_ON,
-                    service_data={ATTR_ENTITY_ID:default_values.tracking_temperature,ATTR_COLOR_TEMP:default_values.current_temperature,ATTR_AUTOMATIC_UPDATE:True}
-                )
+                await default_values.update_hue_temperature()
+                # await default_values.hass.services.async_call(
+                    # domain="light",
+                    # service=SERVICE_TURN_ON,
+                    # service_data={ATTR_ENTITY_ID:default_values.tracking_temperature,ATTR_COLOR_TEMP:default_values.current_temperature,ATTR_AUTOMATIC_UPDATE:True}
+                # )
 
     def calculate_current_brightness() -> int :
         if default_values.hass is not None:
@@ -325,15 +437,19 @@ class default_values():
         if tracking:
             if entity_id not in default_values.tracking_brightness:
                 default_values.tracking_brightness.append(entity_id)
+                default_values.update_hue_groups_later()
         elif entity_id in default_values.tracking_brightness:
             default_values.tracking_brightness.remove(entity_id)
+            default_values.update_hue_groups_later()
 
     def set_tracking_temperature(entity_id:str, tracking:bool):
         if tracking:
             if entity_id not in default_values.tracking_temperature:
                 default_values.tracking_temperature.append(entity_id)
+                default_values.update_hue_groups_later()
         elif entity_id in default_values.tracking_temperature:
             default_values.tracking_temperature.remove(entity_id)
+            default_values.update_hue_groups_later()
     
     def is_light_automatic(entity_id:str) -> bool:
         # TODO: cache results
