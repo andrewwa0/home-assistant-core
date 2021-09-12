@@ -603,6 +603,81 @@ auto_on:
           max: 300
           unit_of_measurement: seconds
 
+hue_reload:
+  name: Reload Hue Configuration
+  description: Reload the group and light configuration
+
+all_lights_off:
+  name: All lights off
+  description: Turn all the lights off
+  fields:
+    transition:
+      name: Transition
+      description: Duration it takes to get to next state.
+      default: 1.5
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+
+motion_on:
+  name: Motion On
+  description: Turn on (or reset) a light to based on motion
+  target:
+    entity:
+      domain: light
+  fields:
+    sensor_entity_id:
+      name: Montion sensor
+      description: The motion sensor that triggered the service
+      entity:
+        domain: binary_sensor
+    transition:
+      name: Transition
+      description: Duration it takes to get to next state.
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+    dim_after:
+      name: Dim the light after this duration
+      description: Duration before dimming the light.
+      default: 
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+    dim_transition:
+      name: Dim transition
+      description: Duration it takes to get to next state.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+    off_after:
+      name: Turn off
+      description: Duration before turning the light off.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+    off_transition:
+      name: Off transition
+      description: Duration it takes to get to next state.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+
 dim:
   name: Dim
   description: Dim a light and optionally turn it off
@@ -630,7 +705,7 @@ dim:
     off_transition:
       name: Off transition
       description: Duration it takes to get to next state.
-      default: 30
+      default: 1
       selector:
         number:
           min: 0
