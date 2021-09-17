@@ -18,18 +18,22 @@ class MutableValue(Generic[_T]):
     def __init__(self, v:_T = None):
         self.value:_T = v
         self.dirty:bool = False
+        self.major_update:bool = False
     def set(self,v:_T) -> bool:
         if self.value != v:
+            self.major_update = isinstance(v,int) and (self.value is None or (abs(self.value-v)) > 10)
             self.value = v
             self.dirty = True
         return self.dirty
     def reset(self, v:_T = None):
         self.value = v
         self.dirty = True
+        self.major_update = False
     def clean(self):
         self.dirty = False
+        self.major_update = False
     def __repr__(self) -> str:
-        return 'MutableValue[Dirty:' + str(self.dirty) + ' Value:' + self.value.__repr__() + ']'
+        return self.value.__repr__() + ('*' if self.dirty else '')
 
 class StringSet(set[str]):
     pass
@@ -171,7 +175,7 @@ class HueAPI():
         return None
 
     async def async_loop(self) -> int:
-        _LOGGER.info("ENTER LOOP")
+        # _LOGGER.info("ENTER LOOP")
         tasks_completed:int = 0
         await asyncio.sleep(0.1)
         while await self.async_update():
@@ -180,7 +184,7 @@ class HueAPI():
             if tasks_completed >= 10:
                 break
         self.looping = False
-        _LOGGER.info("EXIT LOOP - %s TASKS COMPLETED", str(tasks_completed))
+        # _LOGGER.info("EXIT LOOP - %s TASKS COMPLETED", str(tasks_completed))
         return tasks_completed
 
     async def async_update(self) -> bool:
@@ -200,11 +204,13 @@ class HueAPI():
 
     async def async_load_lights(self):
         path:str = '/lights'
-        _LOGGER.info("GET %s",path)
         async with self.session.get(self.uri(path)) as resp:
             json = await resp.json()
             if int(resp.status) == 200:
-                _LOGGER.info("RESULT %s %s",str(resp.status),path)
+                _LOGGER.info("GET %s %s",str(resp.status),path)
+            else:
+                _LOGGER.warning("GET %s %s -> %s",str(resp.status),path,json)
+            if int(resp.status) == 200:
                 self.hue_lights = []
                 for light_id in json:
                     light = json[light_id]
@@ -216,18 +222,20 @@ class HueAPI():
                     _LOGGER.info("Discovered Hue Light: %s", l)
                 _LOGGER.info("Loaded %s lights from Hue", len(self.hue_lights))
                 self.reload_lights_requested = False
-            else:
-                _LOGGER.warning("RESULT %s %s %s",str(resp.status),path,json)
 
     async def async_load_groups(self):
 
         path:str = '/groups'
-        _LOGGER.info("GET %s",path)
         async with self.session.get(self.uri(path)) as resp:
 
             json = await resp.json()
+
             if int(resp.status) == 200:
-                _LOGGER.info("RESULT %s %s",str(resp.status),path)
+                _LOGGER.info("GET %s %s",str(resp.status),path)
+            else:
+                _LOGGER.warning("GET %s %s -> %s",str(resp.status),path,json)
+
+            if int(resp.status) == 200:
 
                 self.hue_groups = []
                 self.auto_brightness_group = None
@@ -255,8 +263,6 @@ class HueAPI():
                     _LOGGER.info("Hue Automatic Brightness group is %s", self.auto_brightness_group.number)
                 if self.auto_temperature_group is not None:
                     _LOGGER.info("Hue Automatic Temperature group is %s", self.auto_temperature_group.number)
-            else:
-                _LOGGER.warning("RESULT %s %s %s",str(resp.status),path,json)
 
         # update the auto group lights from scratch
         self.auto_brightness_group.lights.reset(set())
@@ -275,7 +281,6 @@ class HueAPI():
                 update:str = json.dumps({'lights':list(self.auto_brightness_group.lights.value)})
                 path:str = '/groups/'+self.auto_brightness_group.number
                 uri:str = self.uri(path)
-                _LOGGER.info("PUT %s %s",path,update)
                 async with await self.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
                     results = await res.json()
                     if int(res.status) == 200:
@@ -286,18 +291,17 @@ class HueAPI():
                                     lights = set(success[path+'/lights'])
                                     if lights == self.auto_brightness_group.lights.value:
                                         self.auto_brightness_group.lights.clean()
-                                _LOGGER.info("RESULT %s %s %s %s",str(res.status),('ACK' if not self.auto_brightness_group.lights.dirty else 'NAK'),path,result)
+                                _LOGGER.info("PUT %s %s %s %s -> %s",str(res.status),('ACK' if not self.auto_brightness_group.lights.dirty else 'NAK'),path,update,result)
                             else:
-                                _LOGGER.warning("RESULT %s %s %s",str(res.status),path,result)
+                                _LOGGER.warning("PUT %s %s %s -> %s",str(res.status),path,update,result)
                     else:
-                        _LOGGER.warning("RESULT %s %s %s",str(res.status),path,results)
+                        _LOGGER.warning("PUT %s %s %s -> %s",str(res.status),path,update,results)
                 return True
             if self.auto_temperature_group.lights.dirty and len(self.auto_temperature_group.lights.value) > 0:
                 _LOGGER.info("UPDATING HUE TEMPERATURE GROUP %s", self.auto_temperature_group)
                 update:str = json.dumps({'lights':list(self.auto_temperature_group.lights.value)})
                 path:str = '/groups/'+self.auto_temperature_group.number
                 uri:str = self.uri(path)
-                _LOGGER.info("PUT %s %s",path,update)
                 async with await self.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
                     results = await res.json()
                     if int(res.status) == 200:
@@ -308,36 +312,31 @@ class HueAPI():
                                     lights = set(success[path+'/lights'])
                                     if lights == self.auto_temperature_group.lights.value:
                                         self.auto_temperature_group.lights.clean()
-                                _LOGGER.info("RESULT %s %s %s %s",str(res.status),('ACK' if not self.auto_temperature_group.lights.dirty else 'NAK'),path,result)
+                                _LOGGER.info("PUT %s %s %s %s -> %s",str(res.status),('ACK' if not self.auto_temperature_group.lights.dirty else 'NAK'),path,update,result)
                             else:
-                                _LOGGER.warning("RESULT %s %s %s",str(res.status),path,result)
+                                _LOGGER.warning("PUT %s %s %s -> %s",str(res.status),path,update,result)
                     else:
-                        _LOGGER.warning("RESULT %s %s %s",str(res.status),path,results)
+                        _LOGGER.warning("PUT %s %s %s -> %s",str(res.status),path,update,results)
                 return True
         return False
     
     def uri(self, path:str) -> str:
         return self.hue_base_uri + path
     
-    def process_action_result(self, path, status, results):
+    def process_action_result(self, path, status, update, results):
         if int(status) == 200:
+            _LOGGER.info("PUT %s %s %s -> %s",str(status),path,update,results)
             for result in results:
-                confirmed:bool = False
                 if 'success' in result:
                     success = result['success']
                     if path+'/bri' in success:
                         if self.auto_brightness_group.brightness.value == success[path+'/bri']:
-                            confirmed = True
                             self.auto_brightness_group.brightness.clean()
                     if path+'/ct' in success:
                         if self.auto_temperature_group.color_temp.value == success[path+'/ct']:
-                            confirmed = True
                             self.auto_temperature_group.color_temp.clean()
-                    _LOGGER.info("RESULT %s %s %s %s",str(status),('ACK' if confirmed else 'NAK'),path,result)
-                else:
-                    _LOGGER.warning("RESULT %s %s %s",str(status),path,result)
         else:
-            _LOGGER.warning("RESULT %s %s %s",str(status),path,results)
+            _LOGGER.warning("PUT %s %s %s -> %s",str(status),path,update,results)
     
     async def async_update_hue_values(self) -> bool:
 
@@ -352,42 +351,47 @@ class HueAPI():
                     and self.auto_brightness_group.lights.value == self.auto_temperature_group.lights.value
                 ):
                     # if the same lights are in both groups, issue a single command to one of the groups
-                    update:str = json.dumps({'bri':self.auto_brightness_group.brightness.value,'ct':self.auto_temperature_group.color_temp.value})
+                    if self.auto_brightness_group.brightness.major_update or self.auto_temperature_group.color_temp.major_update:
+                        update:str = json.dumps({'bri':self.auto_brightness_group.brightness.value,'ct':self.auto_temperature_group.color_temp.value,'transitiontime':100})
+                    else:
+                        update:str = json.dumps({'bri':self.auto_brightness_group.brightness.value,'ct':self.auto_temperature_group.color_temp.value})
                     path:str = '/groups/'+self.auto_brightness_group.number+'/action'
                     uri:str = self.uri(path)
-                    _LOGGER.info("PUT %s %s",path,update)
                     async with await self.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
                         results = await res.json()
-                        self.process_action_result(path,res.status,results)
+                        self.process_action_result(path,res.status,update,results)
                     return True
                 elif self.auto_brightness_group.brightness.dirty and self.auto_brightness_group.lights.value:
-                    update:str = json.dumps({'bri':self.auto_brightness_group.brightness.value})
+                    if self.auto_brightness_group.brightness.major_update:
+                        update:str = json.dumps({'bri':self.auto_brightness_group.brightness.value,'transitiontime':100})
+                    else:
+                        update:str = json.dumps({'bri':self.auto_brightness_group.brightness.value})
                     path:str = '/groups/'+self.auto_brightness_group.number+'/action'
                     uri:str = self.uri(path)
-                    _LOGGER.info("PUT %s %s",path,update)
                     async with await self.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
                         results = await res.json()
-                        self.process_action_result(path,res.status,results)
+                        self.process_action_result(path,res.status,update,results)
                     return True
                 elif self.auto_temperature_group.color_temp.dirty and self.auto_temperature_group.lights.value:
-                    update:str = json.dumps({'ct':self.auto_temperature_group.color_temp.value})
+                    if self.auto_temperature_group.color_temp.major_update:
+                        update:str = json.dumps({'ct':self.auto_temperature_group.color_temp.value,'transitiontime':100})
+                    else:
+                        update:str = json.dumps({'ct':self.auto_temperature_group.color_temp.value})
                     path:str = '/groups/'+self.auto_temperature_group.number+'/action'
                     uri:str = self.uri(path)
-                    _LOGGER.info("PUT %s %s",path,update)
                     async with await self.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
                         results = await res.json()
-                        self.process_action_result(path,res.status,results)
+                        self.process_action_result(path,res.status,update,results)
                     return True
         return False
     
     async def async_process_commands(self) -> bool:
         if self.all_off_requested:
-            update:str = json.dumps({'on':False,'transitiontime':15})
+            update:str = json.dumps({'on':False,'transitiontime':25})
             path:str = '/groups/0/action'
             uri:str = self.uri(path)
-            _LOGGER.info("PUT %s %s",path,update)
             async with await self.session.put(uri, data=update, headers={aiohttp.hdrs.CONTENT_TYPE:'application/json'}) as res:
-                _LOGGER.info("RESULT %s %s",str(res.status),await res.json())
+                _LOGGER.info("PUT %s %s -> %s",str(res.status),update,await res.json())
                 self.auto_brightness_group.lights.reset(set())
                 self.auto_brightness_group.lights.clean()
                 self.auto_temperature_group.lights.reset(set())
