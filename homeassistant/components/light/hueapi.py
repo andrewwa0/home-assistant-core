@@ -88,40 +88,44 @@ class HueAPI():
             self.run_loop()
 
     def add_automatic_brightness_light(self, light:str):
-        if self.auto_brightness_group:
+        if light and self.auto_brightness_group:
             if light not in self.auto_brightness_group.lights.value:
                 self.auto_brightness_group.lights.value.add(light)
                 self.auto_brightness_group.lights.dirty = True
                 self.run_loop()
     def add_automatic_brightness_lights(self, lights:set[str]):
-        for light in lights: self.add_automatic_brightness_light(light)
+        if lights:
+            for light in lights: self.add_automatic_brightness_light(light)
 
     def add_automatic_temperature_light(self, light:str):
-        if self.auto_temperature_group:
+        if light and self.auto_temperature_group:
             if light not in self.auto_temperature_group.lights.value:
                 self.auto_temperature_group.lights.value.add(light)
                 self.auto_temperature_group.lights.dirty = True
                 self.run_loop()
     def add_automatic_temperature_lights(self, lights:set[str]):
-        for light in lights: self.add_automatic_temperature_light(light)
+        if lights:
+            for light in lights: self.add_automatic_temperature_light(light)
 
     def remove_automatic_brightness_light(self, light:str):
-        if self.auto_brightness_group:
+        if light and self.auto_brightness_group:
             if light in self.auto_brightness_group.lights.value:
                 self.auto_brightness_group.lights.value.remove(light)
                 self.auto_brightness_group.lights.dirty = True
                 self.run_loop()
     def remove_automatic_brightness_lights(self, lights:set[str]):
-        for light in lights: self.remove_automatic_brightness_light(light)
+        if lights:
+            for light in lights: self.remove_automatic_brightness_light(light)
 
     def remove_automatic_temperature_light(self, light:str):
-        if self.auto_temperature_group:
+        if light and self.auto_temperature_group:
             if light in self.auto_temperature_group.lights.value:
                 self.auto_temperature_group.lights.value.remove(light)
                 self.auto_temperature_group.lights.dirty = True
                 self.run_loop()
     def remove_automatic_temperature_lights(self, lights:set[str]):
-        for light in lights: self.remove_automatic_temperature_light(light)
+        if lights:
+            for light in lights: self.remove_automatic_temperature_light(light)
 
     def set_automatic_brightness(self, brightness:int):
         if self.auto_brightness_group:
