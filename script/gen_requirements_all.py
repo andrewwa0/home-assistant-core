@@ -45,6 +45,10 @@ COMMENT_REQUIREMENTS = (
     "VL53L1X2",
 )
 
+COMMENT_REQUIREMENTS_NORMALIZED = {
+    commented.lower().replace("_", "-") for commented in COMMENT_REQUIREMENTS
+}
+
 IGNORE_PIN = ("colorlog>2.1,<3", "urllib3")
 
 URL_PIN = (
@@ -59,8 +63,8 @@ CONSTRAINT_PATH = os.path.join(
 CONSTRAINT_BASE = """
 pycryptodome>=3.6.6
 
-# Constrain urllib3 to ensure we deal with CVE-2019-11236 & CVE-2019-11324
-urllib3>=1.24.3
+# Constrain urllib3 to ensure we deal with CVE-2020-26137 and CVE-2021-33503
+urllib3>=1.26.5
 
 # Constrain H11 to ensure we get a new enough version to support non-rfc line endings
 h11>=0.12.0
@@ -93,6 +97,22 @@ uuid==1000000000.0.0
 # Temporary constraint on pandas, to unblock 2021.7 releases
 # until we have fixed the wheels builds for newer versions.
 pandas==1.3.0
+
+# regex causes segfault with version 2021.8.27
+# https://bitbucket.org/mrabarnett/mrab-regex/issues/421/2021827-results-in-fatal-python-error
+# This is fixed in 2021.8.28
+regex==2021.8.28
+
+# anyio has a bug that was fixed in 3.3.1
+# can remove after httpx/httpcore updates its anyio version pin
+anyio>=3.3.1
+
+# websockets 10.0 is broken with AWS
+# https://github.com/aaugustin/websockets/issues/1065
+websockets==9.1
+
+# pytest_asyncio breaks our test suite. We rely on pytest-aiohttp instead
+pytest_asyncio==1000000000.0.0
 """
 
 IGNORE_PRE_COMMIT_HOOK_ID = (
@@ -102,6 +122,8 @@ IGNORE_PRE_COMMIT_HOOK_ID = (
     "prettier",
     "python-typing-update",
 )
+
+PACKAGE_REGEX = re.compile(r"^(?:--.+\s)?([-_\.\w\d]+).*==.+$")
 
 
 def has_tests(module: str):
@@ -166,9 +188,24 @@ def gather_recursive_requirements(domain, seen=None):
     return reqs
 
 
+def normalize_package_name(requirement: str) -> str:
+    """Return a normalized package name from a requirement string."""
+    # This function is also used in hassfest.
+    match = PACKAGE_REGEX.search(requirement)
+    if not match:
+        return ""
+
+    # pipdeptree needs lowercase and dash instead of underscore as separator
+    package = match.group(1).lower().replace("_", "-")
+
+    return package
+
+
 def comment_requirement(req):
     """Comment out requirement. Some don't install on all systems."""
-    return any(ign.lower() in req.lower() for ign in COMMENT_REQUIREMENTS)
+    return any(
+        normalize_package_name(req) == ign for ign in COMMENT_REQUIREMENTS_NORMALIZED
+    )
 
 
 def gather_modules():

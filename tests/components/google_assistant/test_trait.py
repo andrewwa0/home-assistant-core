@@ -7,6 +7,7 @@ import pytest
 from homeassistant.components import (
     alarm_control_panel,
     binary_sensor,
+    button,
     camera,
     cover,
     fan,
@@ -146,7 +147,7 @@ async def test_camera_stream(hass):
 
     assert trt.query_attributes() == {
         "cameraStreamAccessUrl": "https://example.com/api/streams/bla",
-        "cameraStreamReceiverAppId": "B12CE3CA",
+        "cameraStreamReceiverAppId": "B45F4572",
     }
 
 
@@ -765,6 +766,26 @@ async def test_light_modes(hass):
         "entity_id": "light.living_room",
         "effect": "colorloop",
     }
+
+
+async def test_scene_button(hass):
+    """Test Scene trait support for the button domain."""
+    assert helpers.get_google_type(button.DOMAIN, None) is not None
+    assert trait.SceneTrait.supported(button.DOMAIN, 0, None, None)
+
+    trt = trait.SceneTrait(hass, State("button.bla", STATE_UNKNOWN), BASIC_CONFIG)
+    assert trt.sync_attributes() == {}
+    assert trt.query_attributes() == {}
+    assert trt.can_execute(trait.COMMAND_ACTIVATE_SCENE, {})
+
+    calls = async_mock_service(hass, button.DOMAIN, button.SERVICE_PRESS)
+    await trt.execute(trait.COMMAND_ACTIVATE_SCENE, BASIC_DATA, {}, {})
+
+    # We don't wait till button press is done.
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    assert calls[0].data == {ATTR_ENTITY_ID: "button.bla"}
 
 
 async def test_scene_scene(hass):
@@ -3003,3 +3024,56 @@ async def test_channel(hass):
     with pytest.raises(SmartHomeError, match="Unsupported command"):
         await trt.execute("Unknown command", BASIC_DATA, {"channelNumber": "1"}, {})
     assert len(media_player_calls) == 1
+
+
+async def test_sensorstate(hass):
+    """Test SensorState trait support for sensor domain."""
+    sensor_types = {
+        sensor.DEVICE_CLASS_AQI: ("AirQuality", "AQI"),
+        sensor.DEVICE_CLASS_CO: ("CarbonDioxideLevel", "PARTS_PER_MILLION"),
+        sensor.DEVICE_CLASS_CO2: ("CarbonMonoxideLevel", "PARTS_PER_MILLION"),
+        sensor.DEVICE_CLASS_PM25: ("PM2.5", "MICROGRAMS_PER_CUBIC_METER"),
+        sensor.DEVICE_CLASS_PM10: ("PM10", "MICROGRAMS_PER_CUBIC_METER"),
+        sensor.DEVICE_CLASS_VOLATILE_ORGANIC_COMPOUNDS: (
+            "VolatileOrganicCompounds",
+            "PARTS_PER_MILLION",
+        ),
+    }
+
+    for sensor_type in sensor_types:
+        assert helpers.get_google_type(sensor.DOMAIN, None) is not None
+        assert trait.SensorStateTrait.supported(sensor.DOMAIN, None, sensor_type, None)
+
+        trt = trait.SensorStateTrait(
+            hass,
+            State(
+                "sensor.test",
+                100.0,
+                {
+                    "device_class": sensor_type,
+                },
+            ),
+            BASIC_CONFIG,
+        )
+
+        name = sensor_types[sensor_type][0]
+        unit = sensor_types[sensor_type][1]
+
+        assert trt.sync_attributes() == {
+            "sensorStatesSupported": {
+                "name": name,
+                "numericCapabilities": {"rawValueUnit": unit},
+            }
+        }
+
+        assert trt.query_attributes() == {
+            "currentSensorStateData": [{"name": name, "rawValue": "100.0"}]
+        }
+
+    assert helpers.get_google_type(sensor.DOMAIN, None) is not None
+    assert (
+        trait.SensorStateTrait.supported(
+            sensor.DOMAIN, None, sensor.DEVICE_CLASS_MONETARY, None
+        )
+        is False
+    )

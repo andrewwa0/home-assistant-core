@@ -15,15 +15,18 @@ from tqdm import tqdm
 
 from homeassistant.const import REQUIRED_PYTHON_VER
 import homeassistant.util.package as pkg_util
-from script.gen_requirements_all import COMMENT_REQUIREMENTS
+from script.gen_requirements_all import COMMENT_REQUIREMENTS, normalize_package_name
 
 from .model import Config, Integration
 
 IGNORE_PACKAGES = {
     commented.lower().replace("_", "-") for commented in COMMENT_REQUIREMENTS
 }
-PACKAGE_REGEX = re.compile(r"^(?:--.+\s)?([-_\.\w\d]+).*==.+$")
+PACKAGE_REGEX = re.compile(
+    r"^(?:--.+\s)?([-_\.\w\d\[\]]+)(==|>=|<=|~=|!=|<|>|===)*(.*)$"
+)
 PIP_REGEX = re.compile(r"^(--.+\s)?([-_\.\w\d]+.*(?:==|>=|<=|~=|!=|<|>|===)?.*$)")
+PIP_VERSION_RANGE_SEPARATOR = re.compile(r"^(==|>=|<=|~=|!=|<|>|===)?(.*)$")
 SUPPORTED_PYTHON_TUPLES = [
     REQUIRED_PYTHON_VER[:2],
     tuple(map(operator.add, REQUIRED_PYTHON_VER, (0, 1, 0)))[:2],
@@ -46,18 +49,6 @@ IGNORE_VIOLATIONS = {
     "slide",
     "suez_water",
 }
-
-
-def normalize_package_name(requirement: str) -> str:
-    """Return a normalized package name from a requirement string."""
-    match = PACKAGE_REGEX.search(requirement)
-    if not match:
-        return ""
-
-    # pipdeptree needs lowercase and dash instead of underscore as separator
-    package = match.group(1).lower().replace("_", "-")
-
-    return package
 
 
 def validate(integrations: dict[str, Integration], config: Config):
@@ -96,21 +87,30 @@ def validate_requirements_format(integration: Integration) -> bool:
             )
             continue
 
-        pkg, sep, version = req.partition("==")
+        pkg, sep, version = PACKAGE_REGEX.match(req).groups()
 
-        if not sep and integration.core:
+        if integration.core and sep != "==":
             integration.add_error(
                 "requirements",
                 f'Requirement {req} need to be pinned "<pkg name>==<version>".',
             )
             continue
 
-        if AwesomeVersion(version).strategy == AwesomeVersionStrategy.UNKNOWN:
-            integration.add_error(
-                "requirements",
-                f"Unable to parse package version ({version}) for {pkg}.",
-            )
+        if not version:
             continue
+
+        for part in version.split(","):
+            version_part = PIP_VERSION_RANGE_SEPARATOR.match(part)
+            if (
+                version_part
+                and AwesomeVersion(version_part.group(2)).strategy
+                == AwesomeVersionStrategy.UNKNOWN
+            ):
+                integration.add_error(
+                    "requirements",
+                    f"Unable to parse package version ({version}) for {pkg}.",
+                )
+                continue
 
     return len(integration.errors) == start_errors
 
@@ -134,7 +134,7 @@ def validate_requirements(integration: Integration):
                 f"Failed to normalize package name from requirement {req}",
             )
             return
-        if package in IGNORE_PACKAGES:
+        if (package == ign for ign in IGNORE_PACKAGES):
             continue
         integration_requirements.add(req)
         integration_packages.add(package)
