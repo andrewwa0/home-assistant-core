@@ -30,7 +30,7 @@ from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.loader import bind_hass
 import homeassistant.util.color as color_util
 
-from .default_values import default_values, ATTR_AUTOMATIC_UPDATE
+from .default_values import default_values, ATTR_AUTOMATIC_UPDATE, ATTR_DIM
 
 # mypy: allow-untyped-defs, no-check-untyped-defs
 
@@ -203,6 +203,7 @@ LIGHT_TURN_ON_SCHEMA = {
         vol.Coerce(int), vol.Range(min=1)
     ),
     vol.Exclusive(ATTR_AUTOMATIC_UPDATE, ATTR_AUTOMATIC_UPDATE): vol.Coerce(bool),
+    vol.Exclusive(ATTR_DIM, ATTR_DIM): vol.Coerce(bool),
     vol.Exclusive(ATTR_KELVIN, COLOR_GROUP): cv.positive_int,
     vol.Exclusive(ATTR_HS_COLOR, COLOR_GROUP): vol.All(
         vol.Coerce(tuple),

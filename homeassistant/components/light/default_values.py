@@ -31,6 +31,7 @@ ATTR_BRIGHTNESS = "brightness"
 ATTR_COLOR_TEMP = "color_temp"
 ATTR_AUTOMATIC = "automatic"
 ATTR_AUTOMATIC_UPDATE = "auto"
+ATTR_DIM = "dim"
 ATTR_OFF_AFTER = "off_after"
 ATTR_OFF_TRANSITION = "off_transition"
 ATTR_DIM_AFTER = "dim_after"
@@ -222,14 +223,15 @@ class default_values():
         if ATTR_BRIGHTNESS in call.data: params[ATTR_BRIGHTNESS] = call.data.get(ATTR_BRIGHTNESS)
         if ATTR_TRANSITION in call.data: params[ATTR_TRANSITION] = call.data.get(ATTR_TRANSITION)
         params[ATTR_ENTITY_ID] = light.entity_id
-        # _LOGGER.info("  - light_turn_on: entity_id:%s params:%s", str(entity_id), str(params))
-        await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params,blocking=True)
+        _LOGGER.info("  - light_turn_on: %s", str(params))
+        await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params)#,blocking=True)
 
     async def async_handle_light_dim_service(light:ToggleEntity, call:ServiceCall):
         _LOGGER.info("async_handle_light_dim_service: light:%s call:%s", str(light), str(call))
         if light is not None and light.is_on:
             params = {}
             params[ATTR_ENTITY_ID] = light.entity_id
+            params[ATTR_DIM] = True
             if ATTR_COLOR_TEMP in call.data:
                 params[ATTR_COLOR_TEMP] = call.data.get(ATTR_COLOR_TEMP)
             else:
@@ -237,7 +239,7 @@ class default_values():
             if ATTR_DIM_TRANSITION in call.data:
                 params[ATTR_TRANSITION] = call.data.get(ATTR_DIM_TRANSITION)
             params[ATTR_BRIGHTNESS] = int(default_values.clamp_int(default_values.current_brightness / 4,3,255))
-            await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params,blocking=True)
+            await default_values.hass.services.async_call(domain="light",service=SERVICE_TURN_ON,service_data=params)#,blocking=True)
 
             off_after = call.data.get(ATTR_OFF_AFTER,None)
             if off_after is not None:
@@ -386,7 +388,7 @@ class default_values():
                     if transition is not None:
                         params[ATTR_TRANSITION] = transition
         
-        if ATTR_BRIGHTNESS in params:
+        if ATTR_BRIGHTNESS in params and not ATTR_DIM in params:
             # prevent the time from turning off the light
             OffTimer.cancel_timer(entity_id=light.entity_id)
         
