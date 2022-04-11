@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from curses import meta
 import json
 import logging
+from wsgiref import headers
 import aiohttp
+import re
 
 from homeassistant.core import HomeAssistant
 
@@ -63,8 +66,11 @@ class HueAPI():
 
     def __init__(self, hass:HomeAssistant):
         self.hass = hass
+        self.apikey = 'fzrRwobrK-cDGj3wJKiOZJ2fdiDCPrXGWKzXzGjl'
         self.session = aiohttp.ClientSession()
-        self.hue_base_uri:str = 'http://192.168.1.2/api/fzrRwobrK-cDGj3wJKiOZJ2fdiDCPrXGWKzXzGjl'
+        self.hue_base_uri:str = 'http://192.168.1.2/api/' + self.apikey
+        self.hue_base_uri2:str = 'https://192.168.1.2/clip/v2'
+        self.hue_headers = { 'hue-application-key': self.apikey }
 
         self.hue_groups:list[HueGroup] = {}
         self.hue_lights:list[HueLight] = []
@@ -167,6 +173,13 @@ class HueAPI():
         for light in self.hue_lights:
             if light.unique_id == unique_id:
                 return {light.number}
+        _LOGGER.warning("Light with unique id '%s' not found", unique_id)
+        return None
+    def lights_from_name(self, name:str) -> set[str]|None:
+        for light in self.hue_lights:
+            if light.name == name:
+                return {light.number}
+        _LOGGER.warning("Light with name '%s' not found", name)
         return None
     def lights_from_group_name(self, name:str) -> set[str]|None:
         for group in self.hue_groups:
@@ -203,23 +216,51 @@ class HueAPI():
         return False # nothing to do
 
     async def async_load_lights(self):
-        path:str = '/lights'
-        async with self.session.get(self.uri(path)) as resp:
+
+        if 0:
+            path:str = '/lights'
+            async with self.session.get(self.uri(path)) as resp:
+                json = await resp.json()
+                if int(resp.status) == 200:
+                    _LOGGER.info("GET %s %s",str(resp.status),path)
+                else:
+                    _LOGGER.warning("GET %s %s -> %s",str(resp.status),path,json)
+                if int(resp.status) == 200:
+                    self.hue_lights = []
+                    for light_id in json:
+                        light = json[light_id]
+                        l = HueLight()
+                        l.name = light["name"]
+                        l.number = light_id
+                        l.unique_id = light["uniqueid"]
+                        self.hue_lights.append(l)
+                        _LOGGER.info("Discovered Hue Light: %s", l)
+                    _LOGGER.info("Loaded %s lights from Hue", len(self.hue_lights))
+                    self.reload_lights_requested = False
+
+        path:str = '/resource/light'
+        async with self.session.get(self.uri2(path), headers=self.hue_headers, ssl=False) as resp:
             json = await resp.json()
             if int(resp.status) == 200:
                 _LOGGER.info("GET %s %s",str(resp.status),path)
             else:
                 _LOGGER.warning("GET %s %s -> %s",str(resp.status),path,json)
             if int(resp.status) == 200:
+                light_data:list = json["data"]
                 self.hue_lights = []
-                for light_id in json:
-                    light = json[light_id]
-                    l = HueLight()
-                    l.name = light["name"]
-                    l.number = light_id
-                    l.unique_id = light["uniqueid"]
-                    self.hue_lights.append(l)
-                    _LOGGER.info("Discovered Hue Light: %s", l)
+                for light in light_data:
+                    unique_id:str = light["id"]
+                    id_v1:str = light["id_v1"]
+                    metadata:object = light["metadata"]
+                    if metadata is not None:
+                        m = re.search('/lights/(\\d+)',id_v1)
+                        if m:
+                            l = HueLight()
+                            l.name = metadata["name"]
+                            l.unique_id = unique_id
+                            l.number = str(m.group(1))
+                            self.hue_lights.append(l)
+                            _LOGGER.info("Discovered Hue Light (v2): %s", l)
                 _LOGGER.info("Loaded %s lights from Hue", len(self.hue_lights))
                 self.reload_lights_requested = False
 
@@ -322,6 +363,9 @@ class HueAPI():
     
     def uri(self, path:str) -> str:
         return self.hue_base_uri + path
+
+    def uri2(self, path:str) -> str:
+        return self.hue_base_uri2 + path
     
     def process_action_result(self, path, status, update, results):
         if int(status) == 200:

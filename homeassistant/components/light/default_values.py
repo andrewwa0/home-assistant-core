@@ -337,13 +337,13 @@ class default_values():
         if entity.extra_state_attributes and entity.extra_state_attributes.get('is_hue_group',False):
             return default_values.hue.lights_from_group_name(entity.name)
         else:
-            return default_values.hue.lights_from_unique_id(entity.unique_id)
+            lights:set[str] = default_values.hue.lights_from_unique_id(entity.unique_id)
+            if lights is None:
+                lights = default_values.hue.lights_from_name(entity.name)
+            return lights
 
     def apply_default_on_values(light:ToggleEntity, params:dict):
         is_on:bool = light.is_on
-
-        
-        # 
 
         if default_values.is_automatic_light(light): # and not ATTR_AUTOMATIC_UPDATE in params:
 
