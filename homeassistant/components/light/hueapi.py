@@ -190,7 +190,7 @@ class HueAPI():
     async def async_loop(self) -> int:
         # _LOGGER.info("ENTER LOOP")
         tasks_completed:int = 0
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(2.0)
         while await self.async_update():
             await asyncio.sleep(1.0)
             tasks_completed += 1

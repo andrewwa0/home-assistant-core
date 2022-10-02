@@ -7,6 +7,7 @@ from asyncio.tasks import  sleep
 import json
 import logging
 import aiohttp
+from enum import Enum
 
 from .hueapi import HueAPI
 
@@ -328,6 +329,12 @@ class default_values():
             return False
         if 'light.bed_' in entity_id:
             return False
+        if 'light.pc_' in entity_id:
+            return False
+        if 'light.damian_pc_' in entity_id:
+            return False
+        if 'light.back' in entity_id:
+            return False
         return True
 
     def is_automatic_light(entity:ToggleEntity) -> bool:
@@ -344,49 +351,67 @@ class default_values():
 
     def apply_default_on_values(light:ToggleEntity, params:dict):
         is_on:bool = light.is_on
+        is_automatic:bool = default_values.is_automatic_light(light)
 
-        if default_values.is_automatic_light(light): # and not ATTR_AUTOMATIC_UPDATE in params:
+        lights:set[str] = default_values.lights_from_entity(light)
 
-            lights:set[str] = default_values.lights_from_entity(light)
+        _LOGGER.info("ON COMMAND FOR %s %s -> %s", light.entity_id, light.unique_id, str(lights))
 
-            _LOGGER.info("ON COMMAND FOR %s %s -> %s", light.entity_id, light.unique_id, str(lights))
+        class GroupAction(Enum):
+            NONE = 0
+            ADD_TO_GROUP = 1
+            REMOVE_FROM_GROUP = -1
 
-            if is_on:
-                # the light is being updated
+        brightness_action:GroupAction = GroupAction.NONE # 1 = add, -1 = remove
+        temperature_action:GroupAction = GroupAction.NONE
 
-                if (ATTR_BRIGHTNESS not in params and ATTR_COLOR_TEMP not in params):
-                    # nothing specified (re-turn on the light e.g. motion re-triggered)
-                    params[ATTR_BRIGHTNESS] = default_values.current_brightness
-                    params[ATTR_COLOR_TEMP] = default_values.current_temperature
-                    default_values.hue.add_automatic_brightness_lights(lights)
-                    default_values.hue.add_automatic_temperature_lights(lights)
-                else:
-                    if ATTR_BRIGHTNESS in params:
-                        # stop tracking brightness
-                        default_values.hue.remove_automatic_brightness_lights(lights)
+        if is_on:
+            # the light is being updated
 
-                    if ATTR_COLOR_TEMP in params:
-                        # stop tracking temperature
-                        default_values.hue.remove_automatic_temperature_lights(lights)
+            if (ATTR_BRIGHTNESS not in params and ATTR_COLOR_TEMP not in params):
+                # nothing specified (re-turn on the light e.g. motion re-triggered)
+                params[ATTR_BRIGHTNESS] = default_values.current_brightness
+                params[ATTR_COLOR_TEMP] = default_values.current_temperature
+                if is_automatic:
+                    brightness_action = GroupAction.ADD_TO_GROUP
+                    temperature_action = GroupAction.ADD_TO_GROUP
+            elif is_automatic:
+                if ATTR_BRIGHTNESS in params:
+                    # stop tracking brightness
+                    brightness_action = GroupAction.REMOVE_FROM_GROUP
+
+                if ATTR_COLOR_TEMP in params:
+                    # stop tracking temperature
+                    temperature_action = GroupAction.REMOVE_FROM_GROUP
+        else:
+            # the light is being turned on
+
+            if ATTR_BRIGHTNESS not in params:
+                params[ATTR_BRIGHTNESS] = default_values.current_brightness
+                brightness_action = GroupAction.ADD_TO_GROUP
             else:
-                # the light is being turned on
+                brightness_action = GroupAction.REMOVE_FROM_GROUP
 
-                if ATTR_BRIGHTNESS not in params:
-                    params[ATTR_BRIGHTNESS] = default_values.current_brightness
-                    default_values.hue.add_automatic_brightness_lights(lights)
-                else:
-                    default_values.hue.remove_automatic_brightness_lights(lights)
+            if ATTR_COLOR_TEMP not in params:
+                params[ATTR_COLOR_TEMP] = default_values.current_temperature
+                temperature_action = GroupAction.ADD_TO_GROUP
+            else:
+                temperature_action = GroupAction.REMOVE_FROM_GROUP
 
-                if ATTR_COLOR_TEMP not in params:
-                    params[ATTR_COLOR_TEMP] = default_values.current_temperature
-                    default_values.hue.add_automatic_temperature_lights(lights)
-                else:
-                    default_values.hue.remove_automatic_temperature_lights(lights)
-
-                if ATTR_TRANSITION not in params:
-                    transition:float = default_values.on_transition_time()
-                    if transition is not None:
-                        params[ATTR_TRANSITION] = transition
+            if ATTR_TRANSITION not in params:
+                transition:float = default_values.on_transition_time()
+                if transition is not None:
+                    params[ATTR_TRANSITION] = transition
+        
+        if is_automatic and lights:
+            if brightness_action == GroupAction.ADD_TO_GROUP:
+                default_values.hue.add_automatic_brightness_lights(lights)
+            elif brightness_action == GroupAction.REMOVE_FROM_GROUP:
+                default_values.hue.remove_automatic_brightness_lights(lights)
+            if temperature_action == GroupAction.ADD_TO_GROUP:
+                default_values.hue.add_automatic_temperature_lights(lights)
+            elif temperature_action == GroupAction.REMOVE_FROM_GROUP:
+                default_values.hue.remove_automatic_temperature_lights(lights)
         
         if ATTR_BRIGHTNESS in params and not ATTR_DIM in params:
             # prevent the time from turning off the light
